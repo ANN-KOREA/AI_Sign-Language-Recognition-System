@@ -92,7 +92,11 @@ class SelectorBIC(ModelSelector):
             except Exception as e:
                 continue
     
-        return bestModel if bestModel is not None else self.base_model(self.n_constant)
+        if bestModel is not None:
+            return bestModel
+        else:
+            return self.base_model(self.n_constant)
+         
 
 
 class SelectorDIC(ModelSelector):
@@ -105,47 +109,29 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
-    models ={}
-    values ={}
-
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
         
         # TODO implement model selection based on DIC scores
-        if len(SelectorDIC.models) == 0:
-            # creating dictionary
-            for n_components in range(self.min_n_components, self.max_n_components+1):
-                n_components_models={} 
-                n_components_ml={}
-
-                for word in self.words.keys():
-                    X, lengths = self.hwords[word]
-                    try:
-                        model = GaussianHMM(n_components=n_components, covariance_type="diag", n_iter=1000,
-                                        random_state=inst.random_state, verbose=False).fit(X, lengths)
-                        logL = model.score(X, lengths)
-                        n_components_models[word] = model
-                        n_components_ml[word] = logL
-                    except Exception as e:
-                        continue
-
-                SelectorDIC.models[n_components] = n_components_models
-                SelectorDIC.values[n_components] = n_components_ml
-            
         bestScore = float("-inf")
         bestModel = None
-        for n_components in range(self.min_n_components, self.max_n_components + 1):
-            models, m = SelectorDIC.models[n_components], SelectorDIC.values[n_components]
-            
-            if(self.this_word not in m):
-                continue
-            av = np.mean([m[word] for word in m.keys() if word != self.this_word])
-            dic = m[self.this_word] - av
-            
-            if dic > bestScore:
-                bestScore, bestModel = dic, models[self.this_word]
+        for n in range(self.min_n_components, self.max_n_components+1):
+            try:
+                model = self.base_model(n)
+                logL = model.score(self.X, self.lengths)
+                totalLogL = 0
+                for word in self.words:
+                    other_x, other_lengths = self.hwords[word]
+                    totalLogL += model.score(other_x, other_lengths)
+                avgLogL = totalLogL/(len(self.words)-1)
+                dicScore = logL - avgLogL
                 
-        return bestModel if bestModel is not None else self.base_model(self.n_constant)
+                if dicScore > bestScore:
+                    bestScore = dic_score
+                    bestModel = model
+            except:
+                continue
+        return bestModel
 
     
 class SelectorCV(ModelSelector):
