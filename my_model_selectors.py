@@ -77,7 +77,22 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        bestScore = float("inf")
+        bestModel  = None
+        for nComponents in range(self.min_n_components, self.max_n_components+1):
+            try:
+                model = self.base_model(nComponents)
+                logL = model.score(self.X, self.lengths)
+                nFeatures = self.X.shape[1]
+                n_params = nComponents * (nComponents - 1) + 2 * nFeatures * nComponents
+                logN = np.log(self.X.shape[0])
+                bic = -2 * logL + n_params * logN
+                if bic < bestScore:
+                    bestScore, bestModel = bic, model
+            except Exception as e:
+                continue
+    
+        return bestModel if bestModel is not None else self.base_model(self.n_constant)
 
 
 class SelectorDIC(ModelSelector):
@@ -90,20 +105,81 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
+    models ={}
+    values ={}
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
+        
         # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        if len(SelectorDIC.models) == 0:
+            # creating dictionary
+            for n_components in range(self.min_n_components, self.max_n_components+1):
+                n_components_models={} 
+                n_components_ml={}
 
+                for word in self.words.keys():
+                    X, lengths = self.hwords[word]
+                    try:
+                        model = GaussianHMM(n_components=n_components, covariance_type="diag", n_iter=1000,
+                                        random_state=inst.random_state, verbose=False).fit(X, lengths)
+                        logL = model.score(X, lengths)
+                        n_components_models[word] = model
+                        n_components_ml[word] = logL
+                    except Exception as e:
+                        continue
 
+                SelectorDIC.models[n_components] = n_components_models
+                SelectorDIC.values[n_components] = n_components_ml
+            
+        bestScore = float("-inf")
+        bestModel = None
+        for n_components in range(self.min_n_components, self.max_n_components + 1):
+            models, m = SelectorDIC.models[n_components], SelectorDIC.values[n_components]
+            
+            if(self.this_word not in m):
+                continue
+            av = np.mean([m[word] for word in m.keys() if word != self.this_word])
+            dic = m[self.this_word] - av
+            
+            if dic > bestScore:
+                bestScore, bestModel = dic, models[self.this_word]
+                
+        return bestModel if bestModel is not None else self.base_model(self.n_constant)
+
+    
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
 
     '''
-
+    
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection using CV
-        raise NotImplementedError
+        bestScore = float("-inf")
+        bestModel = None
+        for nComponents in range(self.min_n_components, self.max_n_components + 1):
+            scores = [] 
+            nSplits = 3
+            model, logL = None, None
+            if(len(self.sequences) < nSplits):
+                break
+            splitMethod = KFold(random_state=self.random_state, n_splits=nSplits)
+            for cv_train_ids, cv_test_ids in splitMethod.split(self.sequences):
+                X_train, lengths_train = combine_sequences(cv_train_ids, self.sequences)
+                X_test,  lengths_test  = combine_sequences(cv_test_ids, self.sequences)
+                try:
+                    model = GaussianHMM(nComponents=n_components, covariance_type="diag", n_iter=1000,
+                                    random_state=inst.random_state, verbose=False).fit(X_train, lengths_train)
+                    logL = model.score(X_test, lengths_test)
+                    scores.append(logL)
+                except Exception as e:
+                    break
+            
+            av = np.average(scores) if len(scores) > 0 else float("-inf")
+            
+            if av > bestScore:
+                bestScore, bestModel = av, model
+        
+        return bestModel if bestModel is not None else self.base_model(self.n_constant)
